@@ -20,10 +20,11 @@ DHT dht(DHTPIN, DHTTYPE);
 
 // LDR Sensor
 #define LDR_PIN A0      // LDR sensor pin (Analog input)
-#define BUZZ D7
+#define BUZZ D7  //Buzzer Pin
+#define LEDIND D8  //LED indicator
 // Adafruit IO credentials
 #define AIO_USERNAME    "HMQEII_AEC"
-#define AIO_KEY         "aio_AAvo41CqEZmB8AJhlSuTsHLd5piL"
+#define AIO_KEY         ""
 
 // NTP Client for time synchronization
 WiFiUDP ntpUDP;
@@ -50,6 +51,7 @@ String location = "Unknown";
 void setup() {
   // Start Serial for debugging and user input
   Serial.begin(9600);
+  pinMode(LEDIND, OUTPUT);
 
   // Request WiFi credentials from the user
   Serial.println("Please enter SSID: ");
@@ -73,6 +75,10 @@ void setup() {
 
   Serial.print("Connecting to WiFi...");
   while (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(LEDIND, HIGH);   // LED ON
+    delay(300);                    // Short delay
+    digitalWrite(LEDIND, LOW);    // LED OFF
+    delay(300);
     delay(500);
     Serial.print(".");
   }
@@ -83,6 +89,10 @@ void setup() {
 
   // Wait for Adafruit IO connection
   while(io.status() < AIO_CONNECTED) {
+    digitalWrite(LEDIND, HIGH);   // LED ON
+    delay(300);                    // Short delay
+    digitalWrite(LEDIND, LOW);    // LED OFF
+    delay(300);
     Serial.print(".");
     delay(500);
   }
@@ -174,6 +184,9 @@ void loop() {
 
   // Delay between sending data (adjust as needed)
   tone(BUZZ, 100, 1);
+  digitalWrite(LEDIND, HIGH);   // LED ON (Indicating successful operation)
+  delay(100);                    // Short delay for the blink
+  digitalWrite(LEDIND, LOW);
   delay(12000);
 }
 
