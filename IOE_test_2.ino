@@ -1,13 +1,10 @@
 #include <ESP8266WiFi.h>
-#include "Adafruit_MQTT.h"
-#include "Adafruit_MQTT_Client.h"
-#include "AdafruitIO_WiFi.h"
 #include <DHT.h>
 #include <SoftwareSerial.h>
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <ArduinoJson.h>
-#include <ESP8266HTTPClient.h>  // Include this for HTTPClient
+#include <ESP8266HTTPClient.h>
 
 // DHT Sensor
 #define DHTPIN D4       // Pin connected to the DHT22
@@ -20,11 +17,8 @@ DHT dht(DHTPIN, DHTTYPE);
 
 // LDR Sensor
 #define LDR_PIN A0      // LDR sensor pin (Analog input)
-#define BUZZ D7  //Buzzer Pin
-#define LEDIND D8  //LED indicator
-// Adafruit IO credentials
-#define AIO_USERNAME    "HMQEII_AEC"
-#define AIO_KEY         ""
+#define BUZZ D7         // Buzzer Pin
+#define LEDIND D8       // LED indicator
 
 // NTP Client for time synchronization
 WiFiUDP ntpUDP;
@@ -34,19 +28,14 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 19800, 60000); // Adjust for IST (1
 String ssid;
 String password;
 
-// Create an instance of the Adafruit IO client
-AdafruitIO_WiFi io(AIO_USERNAME, AIO_KEY, ssid.c_str(), password.c_str());
-
-// Create feeds for each sensor
-AdafruitIO_Feed *tempFeed = io.feed("temperature");
-AdafruitIO_Feed *humidityFeed = io.feed("humidity");
-AdafruitIO_Feed *ldrFeed = io.feed("ldr_value");
-AdafruitIO_Feed *distanceFeed = io.feed("distance");
-AdafruitIO_Feed *locationFeed = io.feed("location");
-AdafruitIO_Feed *timeFeed = io.feed("time");
-
 // Global variable to store the location
-String location = "Unknown";
+String location = "Mira Road";
+
+// Flask API endpoint
+const char* serverName = "https://io-t-connectivity-api.vercel.app/api/data";  // Replace with your Flask API URL
+
+// HTTP Client instance (move this outside of loop)
+HTTPClient http;
 
 void setup() {
   // Start Serial for debugging and user input
@@ -61,7 +50,7 @@ void setup() {
       ssid.trim();  // Remove any extra spaces
     }
   }
-  
+
   Serial.println("Please enter Password: ");
   while (password == "") {
     if (Serial.available()) {
@@ -80,23 +69,9 @@ void setup() {
     digitalWrite(LEDIND, LOW);    // LED OFF
     delay(300);
     delay(500);
-    Serial.print(".");
+    Serial.print("...");
   }
   Serial.println("\nWiFi Connected!");
-
-  // Connect to Adafruit IO using the credentials
-  io.connect();
-
-  // Wait for Adafruit IO connection
-  while(io.status() < AIO_CONNECTED) {
-    digitalWrite(LEDIND, HIGH);   // LED ON
-    delay(300);                    // Short delay
-    digitalWrite(LEDIND, LOW);    // LED OFF
-    delay(300);
-    Serial.print(".");
-    delay(500);
-  }
-  Serial.println("\nAdafruit IO Connected!");
 
   // Start NTP client
   timeClient.begin();
@@ -110,18 +85,9 @@ void setup() {
 
   // Retrieve location only once
   location = getLocationFromWiFi();
-
-  // Send location to Adafruit IO (only once)
-  locationFeed->save(location);
-
-  // Delay to stabilize everything
-  delay(2000);
 }
 
 void loop() {
-  // Ensure connection to Adafruit IO
-  io.run();
-
   // --- Read sensor values ---
   
   // 1. Read temperature and humidity from DHT22
@@ -159,28 +125,41 @@ void loop() {
   timeClient.update();
   String time = timeClient.getFormattedTime();
 
-  // --- Send data to Adafruit IO ---
+  // --- Prepare JSON payload ---
+  String postData;
+  DynamicJsonDocument doc(1024);
   
-  // Send temperature and humidity
-  tempFeed->save(temperature);
-  humidityFeed->save(humidity);
+  doc["temperature"] = temperature;
+  doc["humidity"] = humidity;
+  doc["ldr_value"] = ldrValue;
+  doc["distance"] = waterLevelValue;
+  doc["location"] = location;
+  doc["time"] = time;
+  
+  serializeJson(doc, postData);
 
-  // Send LDR value
-  ldrFeed->save(ldrValue);
+  // --- Send data to Flask API ---
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClientSecure client;  // Create a secure WiFiClient
+    client.setInsecure();  // If you don't have a certificate, disable SSL validation (insecure)
+    http.begin(client, serverName);  // Begin with the secure client
 
-  // Send ultrasonic sensor distance
-  distanceFeed->save(waterLevelValue);
+    // WiFiClient client;  // Create a WiFiClient instance
+    // http.begin(client, serverName);  // Specify your Flask API URL with the WiFiClient object
+    http.addHeader("Content-Type", "application/json");  // Specify content type header
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);  // Follow redirects automatically
 
-  // Send time (time is updated each loop cycle)
-  timeFeed->save(time);
-
-  // Print to Serial Monitor
-  Serial.print("Temperature: "); Serial.println(temperature);
-  Serial.print("Humidity: "); Serial.println(humidity);
-  Serial.print("LDR Value: "); Serial.println(ldrValue);
-  Serial.print("Distance: "); Serial.println(distance); Serial.println(waterLevelValue);
-  Serial.print("Location: "); Serial.println(location);  // Location retrieved once and used repeatedly
-  Serial.print("Time: "); Serial.println(time);
+    int httpResponseCode = http.POST(postData);  // Send POST request
+    if (httpResponseCode > 0) {
+      String response = http.getString();  // Get the response to the request
+      Serial.println("HTTP Response Code: " + String(httpResponseCode));  // Print return code
+      Serial.println("Response: " + response);  // Print response
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();  // Free resources
+  }
 
   // Delay between sending data (adjust as needed)
   tone(BUZZ, 100, 1);
@@ -194,7 +173,7 @@ void loop() {
 String getLocationFromWiFi() {
   WiFiClientSecure client;
   client.setInsecure();  // Disable SSL certificate validation
-  
+
   HTTPClient http;  // Use HTTPClient after including ESP8266HTTPClient.h
   http.begin(client, "https://ipapi.co/json");  // Use HTTPS URL
 
