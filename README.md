@@ -8,3 +8,4 @@ Link to Dashboard:  _https://io.adafruit.com/HMQEII_AEC/dashboards/sensor-dashbo
 
 **Link to OpenWeatherMap:** _https://home.openweathermap.org/api_keys_
 
+**Link to IMD Data Services: ** _https://dsp.imdpune.gov.in/_
